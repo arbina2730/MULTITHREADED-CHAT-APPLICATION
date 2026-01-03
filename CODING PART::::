@@ -1,0 +1,143 @@
+import java.io.*;
+import java.net.*;
+import java.util.*;
+
+/**
+ * ChatApp
+ * -------
+ * Single-file Java multithreaded chat application.
+ * Supports both server and client modes.
+ */
+public class ChatApp {
+
+    private static final int PORT = 1234;
+    private static Set<ClientHandler> clients = Collections.synchronizedSet(new HashSet<>());
+
+    public static void main(String[] args) {
+        if (args.length == 0) {
+            System.out.println("Usage: java ChatApp <server|client>");
+            return;
+        }
+
+        if (args[0].equalsIgnoreCase("server")) {
+            startServer();
+        } else if (args[0].equalsIgnoreCase("client")) {
+            startClient();
+        } else {
+            System.out.println("Invalid option. Use 'server' or 'client'.");
+        }
+    }
+
+    /* ================= SERVER ================= */
+
+    private static void startServer() {
+        System.out.println("Chat Server started on port " + PORT);
+
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            while (true) {
+                Socket socket = serverSocket.accept();
+                ClientHandler handler = new ClientHandler(socket);
+                clients.add(handler);
+                handler.start();
+                System.out.println("New client connected.");
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void broadcast(String message, ClientHandler sender) {
+        synchronized (clients) {
+            for (ClientHandler client : clients) {
+                if (client != sender) {
+                    client.sendMessage(message);
+                }
+            }
+        }
+    }
+
+    /* ================= CLIENT HANDLER ================= */
+
+    static class ClientHandler extends Thread {
+        private Socket socket;
+        private PrintWriter out;
+        private BufferedReader in;
+
+        ClientHandler(Socket socket) {
+            this.socket = socket;
+        }
+
+        public void run() {
+            try {
+                in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                out = new PrintWriter(socket.getOutputStream(), true);
+
+                out.println("Connected to chat. Type 'exit' to quit.");
+
+                String message;
+                while ((message = in.readLine()) != null) {
+                    if (message.equalsIgnoreCase("exit")) {
+                        break;
+                    }
+                    System.out.println("Client: " + message);
+                    broadcast("Client says: " + message, this);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                try {
+                    socket.close();
+                    clients.remove(this);
+                    System.out.println("Client disconnected.");
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        void sendMessage(String message) {
+            out.println(message);
+        }
+    }
+
+    /* ================= CLIENT ================= */
+
+    private static void startClient() {
+        try {
+            Socket socket = new Socket("localhost", PORT);
+            System.out.println("Connected to server.");
+
+            BufferedReader in = new BufferedReader(
+                    new InputStreamReader(socket.getInputStream()));
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+
+            BufferedReader userInput = new BufferedReader(
+                    new InputStreamReader(System.in));
+
+            // Listen for server messages
+            new Thread(() -> {
+                try {
+                    String serverMsg;
+                    while ((serverMsg = in.readLine()) != null) {
+                        System.out.println(serverMsg);
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }).start();
+
+            // Send user messages
+            String msg;
+            while ((msg = userInput.readLine()) != null) {
+                out.println(msg);
+                if (msg.equalsIgnoreCase("exit")) {
+                    break;
+                }
+            }
+
+            socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
